@@ -60,6 +60,7 @@ use_nvenc = False
 browser = None
 cj = None
 use_continuous_lecture_numbers = False
+skip_chapters = None
 
 
 # from https://stackoverflow.com/a/21978778/9785713
@@ -72,7 +73,7 @@ def log_subprocess_output(prefix: str, pipe: IO[bytes]):
 
 # this is the first function that is called, we parse the arguments, setup the logger, and ensure that required directories exist
 def pre_run():
-    global dl_assets, dl_captions, dl_quizzes, skip_lectures, caption_locale, quality, bearer_token, course_name, keep_vtt, skip_hls, concurrent_downloads, disable_ipv6, load_from_file, save_to_file, bearer_token, course_url, info, logger, keys, id_as_course_name, LOG_LEVEL, use_h265, h265_crf, h265_preset, use_nvenc, browser, is_subscription_course, DOWNLOAD_DIR, use_continuous_lecture_numbers
+    global dl_assets, dl_captions, dl_quizzes, skip_lectures, caption_locale, quality, bearer_token, course_name, keep_vtt, skip_hls, concurrent_downloads, disable_ipv6, load_from_file, save_to_file, bearer_token, course_url, info, logger, keys, id_as_course_name, LOG_LEVEL, use_h265, h265_crf, h265_preset, use_nvenc, browser, is_subscription_course, DOWNLOAD_DIR, use_continuous_lecture_numbers, skip_chapters
 
     # make sure the logs directory exists
     if not os.path.exists(LOG_DIR_PATH):
@@ -231,6 +232,12 @@ def pre_run():
         action="store_true",
         help="Use continuous lecture numbering instead of per-chapter",
     )
+    parser.add_argument(
+        "--skip-chapters",
+        dest="skip_chapters",
+        type=int,
+        help="skip n chapters",
+    )
     # parser.add_argument("-v", "--version", action="version", version="You are running version {version}".format(version=__version__))
 
     args = parser.parse_args()
@@ -329,6 +336,9 @@ def pre_run():
     logger.addHandler(file_handler)
 
     logger.info(f"Output directory set to {DOWNLOAD_DIR}")
+
+    if args.skip_chapters is not None:
+        skip_chapters = args.skip_chapters
 
     Path(DOWNLOAD_DIR).mkdir(parents=True, exist_ok=True)
     Path(SAVED_DIR).mkdir(parents=True, exist_ok=True)
@@ -924,14 +934,15 @@ class Udemy:
     def _extract_subscription_course_info(self, url):
         course_html = self.session._get(url).text
         soup = BeautifulSoup(course_html, "lxml")
-        data = soup.find("div", {"class": "ud-component--course-taking--app"})
+        # data = soup.find("div", {"class": "ud-component--course-taking--app"})
+        data = soup.find("body", {"class": "ud-component--course-landing-page"})
         if not data:
             logger.fatal("Unable to extract arguments from course page! Make sure you have a cookies.txt file!")
             self.session.terminate()
             sys.exit(1)
         data_args = data.attrs["data-module-args"]
         data_json = json.loads(data_args)
-        course_id = data_json.get("courseId", None)
+        course_id = data_json.get("course_id", None)
         return course_id
 
     def _extract_course_info(self, url):
@@ -1728,6 +1739,9 @@ def parse_new(udemy: Udemy, udemy_object: dict):
     for chapter in udemy_object.get("chapters"):
         chapter_title = chapter.get("chapter_title")
         chapter_index = chapter.get("chapter_index")
+        if skip_chapters is not None and chapter_index <= skip_chapters:
+            print(f'skipping {chapter_title} @ {chapter_index}')
+            continue
         chapter_dir = os.path.join(course_dir, chapter_title)
         if not os.path.exists(chapter_dir):
             os.mkdir(chapter_dir)
